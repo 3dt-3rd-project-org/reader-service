@@ -1,0 +1,20 @@
+{
+  "name": "readpoint-reader-service",
+  "version": "1.0.0",
+  "description": "일반 유저 책 정보 및 그래프 DB 조회 마이크로서비스",
+  "main": "src/functions/*.js",
+  "type": "module",
+  "scripts": {
+    "start": "func start --port 7071",
+    "test": "echo \"No tests defined\""
+  },
+  "dependencies": {
+    "@azure/functions": "^4.1.0",
+    "neo4j-driver": "^5.21.0",
+    "pg": "^8.12.0",
+    "winston": "^3.13.0"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
