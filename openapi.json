@@ -1,0 +1,99 @@
+{
+  "openapi": "3.0.1",
+  "info": {
+    "title": "ReadPoint Reader Service API",
+    "description": "일반 독자용 도서 정보 조회 및 Neo4j 인물 관계 데이터 조회 API 명세",
+    "version": "1.0.0"
+  },
+  "servers": [
+    {
+      "url": "https://<your-reader-service-function-app>.azurewebsites.net/api",
+      "description": "배포된 Reader Service Azure Function App 주소"
+    }
+  ],
+  "paths": {
+    "/books": {
+      "get": {
+        "summary": "분석이 완료된 도서 목록 조회",
+        "description": "상태가 COMPLETE인 모든 도서 목록을 최신순으로 조회합니다.",
+        "responses": {
+          "200": {
+            "description": "도서 목록 조회 완료"
+          },
+          "500": {
+            "description": "서버 내부 오류"
+          }
+        }
+      }
+    },
+    "/books/{id}": {
+      "get": {
+        "summary": "단일 도서 정보 조회",
+        "description": "도서 고유 식별자(ID)를 기준으로 단일 도서 정보를 조회합니다.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "도서 식별자",
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "도서 조회 성공"
+          },
+          "400": {
+            "description": "잘못된 식별자 형식"
+          },
+          "404": {
+            "description": "존재하지 않는 도서"
+          },
+          "500": {
+            "description": "서버 내부 오류"
+          }
+        }
+      }
+    },
+    "/books/{bookId}/relations": {
+      "get": {
+        "summary": "도서 인물 관계 데이터(Neo4j) 조회",
+        "description": "도서 식별자와 특정 문단 시점(p)을 입력받아, 그 시점까지의 인물 노드와 엣지 관계망 정보를 조회합니다. 결과는 캐시될 수 있습니다.",
+        "parameters": [
+          {
+            "name": "bookId",
+            "in": "path",
+            "required": true,
+            "description": "도서 식별자",
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "p",
+            "in": "query",
+            "required": false,
+            "description": "문단 시점 (0 이상의 정수, 기본값: 1)",
+            "schema": {
+              "type": "integer",
+              "default": 1
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "인물 관계망 데이터 반환 완료"
+          },
+          "400": {
+            "description": "잘못된 파라미터 규격"
+          },
+          "500": {
+            "description": "서버 내부 오류"
+          }
+        }
+      }
+    }
+  }
+}
