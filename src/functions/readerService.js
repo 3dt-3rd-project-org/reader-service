@@ -8,25 +8,68 @@ app.http('getBooks', {
   authLevel: 'anonymous',
   route: 'books',
   handler: async (request, context) => {
-    logger.info('[User Books List] 전체 도서 목록 조회 요청 접수');
+    logger.info('[User Books List] 전체 도서 목록 조회 및 검색/페이징 요청 접수');
     try {
-      const result = await dbPool.query(
-        "SELECT books_id, title, author, publisher, published_year, cover_url, isbn, status, updated_at FROM books WHERE status = 'COMPLETE' ORDER BY books_id DESC"
-      );
-      logger.info(`[User Books List] 전체 도서 목록 조회 성공 (조회 수: ${result.rows.length}개)`);
+      const type = request.query.get('type');
+      const keyword = request.query.get('keyword');
+      const startIdParam = request.query.get('startId');
+      const limitParam = request.query.get('limit');
+
+      let queryStr = "SELECT books_id, title, author, publisher, published_year, cover_url, isbn, status, updated_at FROM books WHERE status = 'COMPLETE'";
+      const queryParams = [];
+
+      // 1. 검색 조건 추가
+      if (type && keyword) {
+        const trimmedKeyword = keyword.trim();
+        if (type === 'title') {
+          queryParams.push(`%${trimmedKeyword}%`);
+          queryStr += ` AND title ILIKE $${queryParams.length}`;
+        } else if (type === 'author') {
+          queryParams.push(`%${trimmedKeyword}%`);
+          queryStr += ` AND author ILIKE $${queryParams.length}`;
+        } else if (type === 'publisher') {
+          queryParams.push(trimmedKeyword);
+          queryStr += ` AND publisher = $${queryParams.length}`;
+        }
+      }
+
+      // 2. 페이징 시작 도서 번호(N) 조건 추가 (startId 이하)
+      if (startIdParam) {
+        const startId = parseInt(startIdParam, 10);
+        if (!isNaN(startId)) {
+          queryParams.push(startId);
+          queryStr += ` AND books_id <= $${queryParams.length}`;
+        }
+      }
+
+      // 3. 최신 도서 순 정렬
+      queryStr += " ORDER BY books_id DESC";
+
+      // 4. 개수 제한(k) 조건 추가 (limit)
+      if (limitParam) {
+        const limit = parseInt(limitParam, 10);
+        if (!isNaN(limit) && limit > 0) {
+          queryParams.push(limit);
+          queryStr += ` LIMIT $${queryParams.length}`;
+        }
+      }
+
+      const result = await dbPool.query(queryStr, queryParams);
+      logger.info(`[User Books List] 도서 목록 조회 성공 (결과 수: ${result.rows.length}개)`);
       return {
         status: 200,
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          message: '분석이 완료된 도서 목록을 불러왔습니다.',
+          message: '도서 목록을 성공적으로 불러왔습니다.',
           books: result.rows
         })
       };
     } catch (err) {
-      logger.error(`[User Books List] 조회 오류: ${err.message}`);
+      logger.error(`[User Books List] 조회/검색 오류: ${err.message}`);
       return {
         status: 500,
-        json: { error: 'Internal Server Error', message: err.message }
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ error: 'Internal Server Error', message: err.message })
       };
     }
   }
@@ -52,7 +95,7 @@ app.http('getBookById', {
 
     try {
       logger.info(`[getBookById] Database 쿼리 송신 준비 중... (Parameter: ${bookId})`);
-      
+
       const result = await dbPool.query(
         'SELECT books_id, title, author, publisher, published_year, cover_url, isbn, status, updated_at FROM books WHERE books_id = $1',
         [bookId]
