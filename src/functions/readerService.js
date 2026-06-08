@@ -97,7 +97,7 @@ app.http('getBookById', {
       logger.info(`[getBookById] Database 쿼리 송신 준비 중... (Parameter: ${bookId})`);
 
       const result = await dbPool.query(
-        'SELECT books_id, title, author, publisher, published_year, cover_url, isbn, status, updated_at FROM books WHERE books_id = $1',
+        'SELECT books_id, title, author, publisher, published_year, cover_url, isbn, status, updated_at, epub_blob_path FROM books WHERE books_id = $1',
         [bookId]
       );
 
