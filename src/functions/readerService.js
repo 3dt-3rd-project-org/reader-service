@@ -138,82 +138,100 @@ app.http('getBookRelations', {
   route: 'books/{bookId}/relations',
   handler: async (request, context) => {
     const bookId = parseInt(request.params.bookId, 10);
-    const pParam = request.query.get('p');
+    const chapterParam = request.query.get('c') || request.query.get('chapter');
+    const pParam = request.query.get('p') || request.query.get('para') || request.query.get('paragraph');
 
     if (isNaN(bookId)) {
       return {
         status: 400,
-        json: { error: 'Bad Request', message: 'bookId 파라미터는 유효한 정수여야 합니다.' }
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ error: 'Bad Request', message: 'bookId 파라미터는 유효한 정수여야 합니다.' })
       };
     }
 
+    // 기본값 설정 (파라미터 누락 시 1)
+    const chapter = chapterParam !== null ? parseInt(chapterParam, 10) : 1;
     const p = pParam !== null ? parseInt(pParam, 10) : 1;
+
+    if (isNaN(chapter) || chapter < 1) {
+      return {
+        status: 400,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ error: 'Bad Request', message: '챕터 파라미터 c(또는 chapter)는 1 이상의 정수여야 합니다.' })
+      };
+    }
 
     if (isNaN(p) || p < 0) {
       return {
         status: 400,
-        json: { error: 'Bad Request', message: '문단 파라미터 p는 0 이상의 정수여야 합니다.' }
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ error: 'Bad Request', message: '문단 파라미터 p(또는 para)는 0 이상의 정수여야 합니다.' })
       };
     }
 
-    logger.info(`[User Graph API] Book ID: ${bookId}, 문단 시점 p: ${p}`);
+    logger.info(`[User Graph API] Book ID: ${bookId}, Chapter 시점: ${chapter}, Paragraph 시점: ${p}`);
 
     const session = neo4jDriver.session();
     try {
       const query = `
-        MATCH (n:Person)-[r:RELATED_TO]->(m:Person)
-        WHERE r.book_id = $bookId AND r.start_paragraph_order <= $p
-        RETURN n, r, m
+        CALL custom.getCharacterRelations($bookId, $chapter, $p) 
+        YIELD src, tgt, rel, reason, chapter, para
+        RETURN src, tgt, rel, reason, chapter, para
       `;
 
-      const result = await session.run(query, { bookId, p });
+      const result = await session.run(query, { bookId, chapter, p });
 
       const nodeMap = new Map();
       const edges = [];
 
       result.records.forEach(record => {
-        const n = record.get('n');
-        const r = record.get('r');
-        const m = record.get('m');
+        const src = record.get('src');
+        const tgt = record.get('tgt');
+        const rel = record.get('rel');
+        const reason = record.get('reason');
+        const ch = record.get('chapter');
+        const pa = record.get('para');
 
-        if (n) {
-          const sourceId = String(n.identity);
-          if (!nodeMap.has(sourceId)) {
-            nodeMap.set(sourceId, {
-              id: sourceId,
-              name: n.properties.name,
-              role: n.properties.role
+        const paragraphOrder = pa && typeof pa.toNumber === 'function' ? pa.toNumber() : parseInt(pa, 10);
+
+        if (src) {
+          if (!nodeMap.has(src)) {
+            nodeMap.set(src, {
+              id: src,
+              name: src,
+              role: null
             });
           }
         }
 
-        if (m) {
-          const targetId = String(m.identity);
-          if (!nodeMap.has(targetId)) {
-            nodeMap.set(targetId, {
-              id: targetId,
-              name: m.properties.name,
-              role: m.properties.role
+        if (tgt) {
+          if (!nodeMap.has(tgt)) {
+            nodeMap.set(tgt, {
+              id: tgt,
+              name: tgt,
+              role: null
             });
           }
         }
 
-        if (r) {
+        if (src && tgt && rel) {
           edges.push({
-            id: String(r.identity),
-            source: String(r.start),
-            target: String(r.end),
-            type: r.properties.type || r.type,
-            relation: r.properties.relation,
-            start_paragraph_order: r.properties.start_paragraph_order
+            id: `${src}-${tgt}-${rel}`,
+            source: src,
+            target: tgt,
+            type: rel,
+            relation: reason || null,
+            chapter: ch || null,
+            start_paragraph_order: paragraphOrder || 0
           });
         }
       });
 
-      logger.info(`[User Graph API] Neo4j 조회 성공. 매핑된 노드 수: ${nodeMap.size}개, 관계 수: ${edges.length}개`);
+      logger.info(`[User Graph API] Neo4j 프로시저 조회 성공. 매핑된 노드 수: ${nodeMap.size}개, 관계 수: ${edges.length}개`);
 
       const responsePayload = {
         book_id: bookId,
+        chapter_limit: chapter,
         paragraph_limit: p,
         nodes: Array.from(nodeMap.values()),
         edges: edges
@@ -223,7 +241,7 @@ app.http('getBookRelations', {
         status: 200,
         headers: {
           'Cache-Control': 'public, max-age=86400',
-          'X-Cache-Channel': `book-${bookId}-p-${p}`,
+          'X-Cache-Channel': `book-${bookId}-c-${chapter}-p-${p}`,
           'Content-Type': 'application/json'
         },
         body: JSON.stringify(responsePayload)
@@ -240,6 +258,7 @@ app.http('getBookRelations', {
     }
   }
 });
+
 
 app.http('getBookChapters', {
   methods: ['GET'],
