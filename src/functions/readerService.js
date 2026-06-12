@@ -229,6 +229,67 @@ app.http('getBookRelations', {
 
       logger.info(`[User Graph API] Neo4j 프로시저 조회 성공. 매핑된 노드 수: ${nodeMap.size}개, 관계 수: ${edges.length}개`);
 
+      // PostgreSQL에서 인물 정보 및 사건 역할 조회 (진도 이하의 주요 사건들만 필터링)
+      const charQuery = `
+        SELECT 
+          c.character_id, 
+          c.character_name, 
+          c.role, 
+          ec.event_id, 
+          ec.role_in_event,
+          e.event_order
+        FROM character c
+        LEFT JOIN event_character ec ON c.character_id = ec.character_id
+        LEFT JOIN event e ON ec.event_id = e.event_id
+        LEFT JOIN chapter ch ON e.chapter_id = ch.chapter_id
+        LEFT JOIN paragraph p_start ON e.start_paragraph_id = p_start.paragraph_id
+        WHERE c.books_id = $1
+          AND (
+            ec.event_id IS NULL 
+            OR (
+              e.is_core_event = true
+              AND (
+                ch.chapter_order < $2::integer
+                OR (ch.chapter_order = $2::integer AND p_start.paragraph_order <= $3::integer)
+              )
+            )
+          )
+      `;
+
+      const charDbResult = await dbPool.query(charQuery, [bookId, chapter, p]);
+      logger.info(`[User Graph API] PostgreSQL 인물 정보 및 사건 역할 조회 성공 (조회 수: ${charDbResult.rows.length}개)`);
+
+      const charMap = new Map();
+      charDbResult.rows.forEach(row => {
+        const name = row.character_name;
+        if (!charMap.has(name)) {
+          charMap.set(name, {
+            character_id: parseInt(row.character_id, 10),
+            role: row.role || null,
+            role_in_event: []
+          });
+        }
+        if (row.event_id && row.role_in_event) {
+          charMap.get(name).role_in_event.push({
+            event_id: parseInt(row.event_id, 10),
+            event_order: row.event_order ? parseInt(row.event_order, 10) : null,
+            role_in_event: row.role_in_event
+          });
+        }
+      });
+
+      nodeMap.forEach((node, name) => {
+        const dbChar = charMap.get(name);
+        if (dbChar) {
+          node.character_id = dbChar.character_id;
+          node.role = dbChar.role;
+          node.role_in_event = dbChar.role_in_event;
+        } else {
+          node.character_id = null;
+          node.role_in_event = [];
+        }
+      });
+
       const responsePayload = {
         book_id: bookId,
         chapter_limit: chapter,
@@ -255,6 +316,97 @@ app.http('getBookRelations', {
       };
     } finally {
       await session.close();
+    }
+  }
+});
+
+app.http('getEvents', {
+  methods: ['GET'],
+  authLevel: 'anonymous',
+  route: 'books/{bookId}/events',
+  handler: async (request, context) => {
+    const bookId = parseInt(request.params.bookId, 10);
+    const chapterParam = request.query.get('c') || request.query.get('chapter');
+    const pParam = request.query.get('p') || request.query.get('para') || request.query.get('paragraph');
+
+    if (isNaN(bookId)) {
+      return {
+        status: 400,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ error: 'Bad Request', message: 'bookId 파라미터는 유효한 정수여야 합니다.' })
+      };
+    }
+
+    // 기본값 설정 (파라미터 누락 시 1)
+    const chapter = chapterParam !== null ? parseInt(chapterParam, 10) : 1;
+    const p = pParam !== null ? parseInt(pParam, 10) : 1;
+
+    if (isNaN(chapter) || chapter < 1) {
+      return {
+        status: 400,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ error: 'Bad Request', message: '챕터 파라미터 c(또는 chapter)는 1 이상의 정수여야 합니다.' })
+      };
+    }
+
+    if (isNaN(p) || p < 0) {
+      return {
+        status: 400,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ error: 'Bad Request', message: '문단 파라미터 p(또는 para)는 0 이상의 정수여야 합니다.' })
+      };
+    }
+
+    logger.info(`[User Events API] Book ID: ${bookId}, Chapter 진도: ${chapter}, Paragraph 진도: ${p}`);
+
+    try {
+      const queryStr = `
+        SELECT 
+          e.event_id, 
+          e.event_order, 
+          e.short_title, 
+          e.summary,
+          ch.chapter_order,
+          p_start.paragraph_order AS start_paragraph_order
+        FROM event e
+        JOIN chapter ch ON e.chapter_id = ch.chapter_id
+        JOIN paragraph p_start ON e.start_paragraph_id = p_start.paragraph_id
+        WHERE e.books_id = $1
+          AND e.is_core_event = true
+          AND (
+            ch.chapter_order < $2::integer
+            OR (ch.chapter_order = $2::integer AND p_start.paragraph_order <= $3::integer)
+          )
+        ORDER BY ch.chapter_order ASC, e.event_order ASC, e.event_id ASC
+      `;
+
+      const result = await dbPool.query(queryStr, [bookId, chapter, p]);
+      logger.info(`[User Events API] 사건 목록 조회 성공 (결과 수: ${result.rows.length}개)`);
+
+      const formattedEvents = result.rows.map(row => ({
+        event_id: parseInt(row.event_id, 10),
+        event_order: row.event_order,
+        short_title: row.short_title,
+        summary: row.summary || null,
+        chapter_order: parseInt(row.chapter_order, 10),
+        start_paragraph_order: parseInt(row.start_paragraph_order, 10)
+      }));
+
+      return {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          book_id: bookId,
+          events: formattedEvents
+        })
+      };
+    } catch (err) {
+      logger.error(`[User Events API] 조회 오류: ${err.message}`);
+      return {
+        status: 500,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ error: 'Internal Server Error', message: err.message })
+      };
     }
   }
 });
