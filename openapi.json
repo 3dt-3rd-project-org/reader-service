@@ -11,6 +11,16 @@
       "description": "배포된 Reader Service Azure Function App 주소"
     }
   ],
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "JWT",
+        "description": "독자 권한의 JWT 토큰을 Bearer 헤더에 추가하세요."
+      }
+    }
+  },
   "paths": {
     "/books": {
       "get": {
@@ -204,6 +214,149 @@
           },
           "400": {
             "description": "잘못된 파라미터 규격 또는 유효하지 않은 독서 시점"
+          },
+          "500": {
+            "description": "서버 내부 오류"
+          }
+        }
+      }
+    },
+    "/books/{bookId}/progress": {
+      "get": {
+        "summary": "독서 진도 조회",
+        "description": "사용자의 해당 도서에 대한 마지막 독서 진도(챕터 및 문단 번호)를 조회합니다.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "bookId",
+            "in": "path",
+            "required": true,
+            "description": "도서 식별자",
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "진도 조회 성공",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "progress": {
+                      "type": "object",
+                      "nullable": true,
+                      "properties": {
+                        "id": { "type": "integer" },
+                        "user_id": { "type": "integer" },
+                        "book_id": { "type": "integer" },
+                        "chapter_id": { "type": "integer" },
+                        "chapter_order": { "type": "integer" },
+                        "last_read_paragraph_id": { "type": "integer" },
+                        "paragraph_order": { "type": "integer" },
+                        "created_at": { "type": "string", "format": "date-time" }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "인증 토큰 누락"
+          },
+          "403": {
+            "description": "유효하지 않은 토큰"
+          },
+          "500": {
+            "description": "서버 내부 오류"
+          }
+        }
+      },
+      "post": {
+        "summary": "독서 진도 저장/갱신",
+        "description": "실제 책의 챕터 번호 및 문단 번호를 입력받아 해당 사용자의 독서 진도를 저장하거나 최신 위치로 갱신(UPSERT)합니다.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "bookId",
+            "in": "path",
+            "required": true,
+            "description": "도서 식별자",
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "chapter_order": {
+                    "type": "integer",
+                    "description": "실제 책의 챕터 번호"
+                  },
+                  "paragraph_order": {
+                    "type": "integer",
+                    "description": "실제 책의 문단 번호"
+                  }
+                },
+                "required": [
+                  "chapter_order",
+                  "paragraph_order"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "진도 갱신 성공",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "message": { "type": "string" },
+                    "progress": {
+                      "type": "object",
+                      "properties": {
+                        "id": { "type": "integer" },
+                        "user_id": { "type": "integer" },
+                        "book_id": { "type": "integer" },
+                        "chapter_id": { "type": "integer" },
+                        "chapter_order": { "type": "integer" },
+                        "last_read_paragraph_id": { "type": "integer" },
+                        "paragraph_order": { "type": "integer" },
+                        "created_at": { "type": "string", "format": "date-time" }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "잘못된 파라미터 규격 또는 존재하지 않는 챕터/문단 번호"
+          },
+          "401": {
+            "description": "인증 토큰 누락"
+          },
+          "403": {
+            "description": "유효하지 않은 토큰"
           },
           "500": {
             "description": "서버 내부 오류"
