@@ -9,28 +9,84 @@ app.http('getBooks', {
   authLevel: 'anonymous',
   route: 'books',
   handler: async (request, context) => {
-    logger.info('[User Books List] 전체 도서 목록 조회 및 검색/페이징 요청 접수');
+    logger.info('[User Books List] 도서 목록 조회 및 검색/페이징 요청 접수');
     try {
       const type = request.query.get('type');
       const keyword = request.query.get('keyword');
       const startIdParam = request.query.get('startId');
       const limitParam = request.query.get('limit');
 
-      let queryStr = "SELECT books_id, title, author, publisher, published_year, cover_url, isbn, status, updated_at FROM books WHERE status = 'COMPLETE'";
+      const authHeader = request.headers.get('authorization');
+      const token = authHeader && authHeader.split(' ')[1];
+
+      let queryStr;
       const queryParams = [];
+      let alias = '';
+
+      if (token) {
+        // 1. 토큰이 있는 경우: 사용자 인증 후, 사용자가 읽고 있는 도서 목록 조회 대상 설정
+        const user = authenticateToken(request);
+        const userId = user.id;
+        logger.info(`[User Books List] 인증된 사용자(${userId})의 독서 중인 도서 목록 조회 준비`);
+
+        queryStr = `
+          SELECT 
+              b.books_id, 
+              b.title, 
+              b.author, 
+              b.publisher, 
+              b.published_year, 
+              b.cover_url, 
+              b.isbn, 
+              b.status, 
+              b.updated_at,
+              rl.created_at AS last_read_at,
+              rl.chapter_id AS last_read_chapter_id,
+              c.chapter_order AS last_read_chapter_order,
+              rl.last_read_paragraph_id AS last_read_paragraph_id,
+              p.paragraph_order AS last_read_paragraph_order
+          FROM readpoint.reading_logs rl
+          JOIN books b ON rl.book_id = b.books_id
+          LEFT JOIN readpoint.chapter c ON rl.chapter_id = c.chapter_id
+          LEFT JOIN readpoint.paragraph p ON rl.last_read_paragraph_id = p.paragraph_id
+          WHERE rl.user_id = $1 AND b.status = 'COMPLETE'
+        `;
+        queryParams.push(userId);
+        alias = 'b.';
+      } else {
+        // 2. 토큰이 없는 경우: 전체 도서 목록 조회 대상 설정
+        logger.info('[User Books List] 비로그인 유저 전체 도서 목록 조회 준비');
+        queryStr = `
+          SELECT 
+              books_id, 
+              title, 
+              author, 
+              publisher, 
+              published_year, 
+              cover_url, 
+              isbn, 
+              status, 
+              updated_at 
+          FROM books 
+          WHERE status = 'COMPLETE'
+        `;
+        alias = '';
+      }
+
+      // --- 공통 필터 및 페이징 처리 ---
 
       // 1. 검색 조건 추가
       if (type && keyword) {
         const trimmedKeyword = keyword.trim();
         if (type === 'title') {
           queryParams.push(`%${trimmedKeyword}%`);
-          queryStr += ` AND title ILIKE $${queryParams.length}`;
+          queryStr += ` AND ${alias}title ILIKE $${queryParams.length}`;
         } else if (type === 'author') {
           queryParams.push(`%${trimmedKeyword}%`);
-          queryStr += ` AND author ILIKE $${queryParams.length}`;
+          queryStr += ` AND ${alias}author ILIKE $${queryParams.length}`;
         } else if (type === 'publisher') {
           queryParams.push(trimmedKeyword);
-          queryStr += ` AND publisher = $${queryParams.length}`;
+          queryStr += ` AND ${alias}publisher = $${queryParams.length}`;
         }
       }
 
@@ -39,12 +95,12 @@ app.http('getBooks', {
         const startId = parseInt(startIdParam, 10);
         if (!isNaN(startId)) {
           queryParams.push(startId);
-          queryStr += ` AND books_id <= $${queryParams.length}`;
+          queryStr += ` AND ${alias}books_id <= $${queryParams.length}`;
         }
       }
 
       // 3. 최신 도서 순 정렬
-      queryStr += " ORDER BY books_id DESC";
+      queryStr += ` ORDER BY ${alias}books_id DESC`;
 
       // 4. 개수 제한(k) 조건 추가 (limit)
       if (limitParam) {
@@ -61,11 +117,18 @@ app.http('getBooks', {
         status: 200,
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          message: '도서 목록을 성공적으로 불러왔습니다.',
+          message: token ? '사용자가 읽고 있는 도서 목록을 성공적으로 불러왔습니다.' : '도서 목록을 성공적으로 불러왔습니다.',
           books: result.rows
         })
       };
     } catch (err) {
+      if (err.status) {
+        return {
+          status: err.status,
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(err.body)
+        };
+      }
       logger.error(`[User Books List] 조회/검색 오류: ${err.message}`);
       return {
         status: 500,
