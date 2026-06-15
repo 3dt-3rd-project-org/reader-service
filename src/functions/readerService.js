@@ -457,3 +457,110 @@ app.http('getBookChapters', {
   }
 });
 
+app.http('getBookSummary', {
+  methods: ['GET'],
+  authLevel: 'anonymous',
+  route: 'books/{bookId}/summary',
+  handler: async (request, context) => {
+    const bookId = parseInt(request.params.bookId, 10);
+    const chapterParam = request.query.get('c') || request.query.get('chapter_id');
+    const pParam = request.query.get('p') || request.query.get('end_paragraph_id');
+
+    if (isNaN(bookId)) {
+      return {
+        status: 400,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ error: 'Bad Request', message: 'bookId 파라미터는 유효한 정수여야 합니다.' })
+      };
+    }
+
+    if (!chapterParam || !pParam) {
+      return {
+        status: 400,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ error: 'Bad Request', message: 'chapter_id(또는 c)와 end_paragraph_id(또는 p) 파라미터는 필수입니다.' })
+      };
+    }
+
+    const chapterId = parseInt(chapterParam, 10);
+    const endParagraphId = parseInt(pParam, 10);
+
+    if (isNaN(chapterId) || isNaN(endParagraphId)) {
+      return {
+        status: 400,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ error: 'Bad Request', message: 'chapter_id와 end_paragraph_id는 정수여야 합니다.' })
+      };
+    }
+
+    logger.info(`[User Summary API] Book ID: ${bookId}, Chapter ID: ${chapterId}, End Paragraph ID: ${endParagraphId}`);
+
+    try {
+      // 1. 입력 시점(chapter_id, end_paragraph_id) 유효성 검증
+      const chCheck = await dbPool.query(
+        'SELECT 1 FROM readpoint.chapter WHERE chapter_id = $1 AND books_id = $2',
+        [chapterId, bookId]
+      );
+      const pCheck = await dbPool.query(
+        'SELECT 1 FROM readpoint.paragraph WHERE paragraph_id = $1 AND books_id = $2',
+        [endParagraphId, bookId]
+      );
+
+      if (chCheck.rows.length === 0 || pCheck.rows.length === 0) {
+        logger.warn(`[User Summary API] 존재하지 않는 독서 시점 요청 - Chapter ID: ${chapterId}, Paragraph ID: ${endParagraphId}`);
+        return {
+          status: 400,
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            error: 'Bad Request',
+            message: '제공된 chapter_id 또는 end_paragraph_id가 존재하지 않는 유효하지 않은 시점입니다.'
+          })
+        };
+      }
+
+      // 2. 입력 시점 이하의 가장 최신 core_event 요약 1개 조회
+      const queryStr = `
+        SELECT 
+            ps.summary_3line
+        FROM readpoint.progress_summary ps
+        WHERE ps.books_id = $1
+          AND ps.is_core_event = true
+          AND (
+            ps.chapter_id < $2
+            OR (ps.chapter_id = $2 AND ps.end_paragraph_id <= $3)
+          )
+        ORDER BY ps.chapter_id DESC, ps.end_paragraph_id DESC
+        LIMIT 1;
+      `;
+
+      const result = await dbPool.query(queryStr, [bookId, chapterId, endParagraphId]);
+
+      if (result.rows.length === 0) {
+        logger.info(`[User Summary API] 해당 시점 이전의 요약이 존재하지 않음 - Book ID: ${bookId}`);
+        return {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            summary: null
+          })
+        };
+      }
+
+      logger.info(`[User Summary API] 요약 조회 성공 - Book ID: ${bookId}`);
+      return {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          summary: result.rows[0].summary_3line
+        })
+      };
+    } catch (err) {
+      logger.error(`[User Summary API] 조회 오류: ${err.message}`);
+      return {
+        status: 500,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ error: 'Internal Server Error', message: err.message })
+      };
+    }
+  }
+});

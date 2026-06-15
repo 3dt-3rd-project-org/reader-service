@@ -132,6 +132,84 @@
           }
         }
       }
+    },
+    "/books/{bookId}/summary": {
+      "get": {
+        "summary": "도서 실시간 전체 줄거리 요약 조회",
+        "description": "독자의 현재 진행 시점(chapter_id, end_paragraph_id)을 기준으로, 해당 시점 이하에서 is_core_event가 true인 핵심 사건들 중 가장 최신의 3줄 줄거리 요약 1개를 조회합니다. chapter_id 대신 c, end_paragraph_id 대신 p 요약 파라미터를 사용할 수 있습니다.",
+        "parameters": [
+          {
+            "name": "bookId",
+            "in": "path",
+            "required": true,
+            "description": "도서 식별자",
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "chapter_id",
+            "in": "query",
+            "required": false,
+            "description": "챕터 고유 식별자",
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "c",
+            "in": "query",
+            "required": false,
+            "description": "챕터 고유 식별자 (chapter_id의 요약어)",
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "end_paragraph_id",
+            "in": "query",
+            "required": false,
+            "description": "문단 고유 식별자",
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "p",
+            "in": "query",
+            "required": false,
+            "description": "문단 고유 식별자 (end_paragraph_id의 요약어)",
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "요약 조회 성공",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "summary": {
+                      "type": "string",
+                      "nullable": true,
+                      "description": "3줄 요약 텍스트 (해당 시점 이전에 요약이 존재하지 않는 경우 null)"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "잘못된 파라미터 규격 또는 유효하지 않은 독서 시점"
+          },
+          "500": {
+            "description": "서버 내부 오류"
+          }
+        }
+      }
     }
   }
 }
