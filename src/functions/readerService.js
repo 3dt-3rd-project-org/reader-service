@@ -519,13 +519,12 @@ app.http('getBookSummary', {
         };
       }
 
-      // 2. 입력 시점 이하의 가장 최신 core_event 요약 1개 조회
+      // 2. 입력 시점 이하의 가장 최신 요약 1개 조회 (is_core_event 여부 상관 없음)
       const queryStr = `
         SELECT 
             ps.summary_3line
         FROM readpoint.progress_summary ps
         WHERE ps.books_id = $1
-          AND ps.is_core_event = true
           AND (
             ps.chapter_id < $2
             OR (ps.chapter_id = $2 AND ps.end_paragraph_id <= $3)
